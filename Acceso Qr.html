@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control de acceso SAS</title>
+  <script src="https://unpkg.com/html5-qrcode" defer></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 24px 16px 40px;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      color: #16212e;
+      background: #eef3f8;
+    }
+
+    main {
+      max-width: 440px;
+      margin: auto;
+    }
+
+    h1 {
+      color: #12355b;
+      font-size: 25px;
+      margin: 8px 0;
+    }
+
+    .sub {
+      color: #526171;
+      margin: 0 0 18px;
+    }
+
+    #configuracion, #lector {
+      background: white;
+      padding: 18px;
+      border-radius: 12px;
+    }
+
+    #lector {
+      display: none;
+      background: transparent;
+      padding: 0;
+    }
+
+    #reader {
+      display: none;
+      width: 100%;
+      overflow: hidden;
+      border-radius: 12px;
+      background: white;
+    }
+
+    input {
+      width: 100%;
+      padding: 14px;
+      font-size: 16px;
+      border: 1px solid #aebdcb;
+      border-radius: 10px;
+      margin: 8px 0;
+    }
+
+    button {
+      width: 100%;
+      padding: 16px;
+      margin: 7px 0;
+      font-size: 16px;
+      font-weight: bold;
+      border: 0;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    #guardar, #scan {
+      background: #12355b;
+      color: white;
+    }
+
+    #manual {
+      background: #e3a008;
+      color: #231b00;
+    }
+
+    #stop {
+      display: none;
+      background: #d9e2ec;
+      color: #16212e;
+    }
+
+    #status {
+      min-height: 100px;
+      margin-top: 18px;
+      padding: 18px;
+      border-radius: 12px;
+      background: white;
+      font-size: 18px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #status.ok { background: #d7f2df; color: #14532d; }
+    #status.no { background: #fde0e0; color: #7f1d1d; }
+    #status.wait { background: #e3edf8; color: #12355b; }
+
+    #bridge { display: none; }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>CONTROL DE ACCESO SAS</h1>
+    <p class="sub">Escanee el QR o ingrese el código manualmente.</p>
+
+    <section id="configuracion">
+      <p><strong>Configuración inicial</strong></p>
+      <p>Pegue la URL de Apps Script que termina en <code>/exec</code>.</p>
+
+      <input
+        id="appsUrl"
+        type="url"
+        placeholder="https://script.google.com/macros/s/.../exec"
+      >
+
+      <button id="guardar">GUARDAR Y CONECTAR</button>
+    </section>
+
+    <section id="lector">
+      <button id="scan">ABRIR CÁMARA Y ESCANEAR QR</button>
+
+      <div id="reader"></div>
+
+      <button id="stop">CERRAR CÁMARA</button>
+
+      <input
+        id="code"
+        type="text"
+        autocomplete="off"
+        placeholder="Código manual, ej. SAS-001-01"
+      >
+
+      <button id="manual">VALIDAR CÓDIGO MANUAL</button>
+    </section>
+
+    <div id="status" class="wait">
+      Configure la conexión para comenzar.
+    </div>
+  </main>
+
+  <iframe id="bridge" title="Validador"></iframe>
+
+  <script>
+    const bridge = document.getElementById("bridge");
+    const statusBox = document.getElementById("status");
+    const configBox = document.getElementById("configuracion");
+    const lectorBox = document.getElementById("lector");
+    const urlInput = document.getElementById("appsUrl");
+
+    let bridgeReady = false;
+    let scanner = null;
+    let validating = false;
+
+    function mostrar(texto, tipo) {
+      statusBox.className = tipo || "";
+      statusBox.innerHTML = texto;
+    }
+
+    function escapar(texto) {
+      return String(texto || "").replace(/[&<>"']/g, function(caracter) {
+        return {
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          "\"": "&quot;",
+          "'": "&#39;"
+        }[caracter];
+      });
+    }
+
+    function conectar(url) {
+      url = String(url || "").trim();
+
+      if (!url.includes("/exec")) {
+        mostrar("Pegue una URL válida de Apps Script que termine en /exec.", "no");
+        return;
+      }
+
+      localStorage.setItem("sasAppsUrl", url);
+
+      const separador = url.includes("?") ? "&" : "?";
+      bridge.src = url + separador + "bridge=1";
+
+      configBox.style.display = "none";
+      lectorBox.style.display = "block";
+
+      bridgeReady = false;
+      mostrar("Conectando con el validador…", "wait");
+    }
+
+    document.getElementById("guardar").addEventListener("click", function() {
+      conectar(urlInput.value);
+    });
+
+    window.addEventListener("message", function(event) {
+      const mensaje = event.data || {};
+
+      if (mensaje.type === "SAS_QR_READY") {
+        bridgeReady = true;
+        mostrar("Listo para validar.", "wait");
+      }
+
+      if (mensaje.type !== "SAS_QR_RESULT" || !validating) return;
+
+      validating = false;
+
+      const resultado = mensaje.result || {};
+
+      if (resultado.valido) {
+        mostrar(
+          "✓ ACCESO VÁLIDO<br><br>" +
+          escapar(resultado.estudiante) +
+          "<br>Acceso " + escapar(resultado.acceso) +
+          "<br><br>COLOQUE EL CINTILLO",
+          "ok"
+        );
+      } else {
+        mostrar(
+          "✕ " + escapar(resultado.mensaje) +
+          (resultado.estudiante
+            ? "<br><br>" + escapar(resultado.estudiante)
+            : ""),
+          "no"
+        );
+      }
+
+      document.getElementById("code").value = "";
+      detenerCamara();
+    });
+
+    function validar(codigo) {
+      codigo = String(codigo || "").trim();
+
+      if (!codigo || validating) return;
+
+      if (!bridgeReady) {
+        mostrar("El validador aún no está listo. Espere un momento.", "no");
+        return;
+      }
+
+      validating = true;
+      mostrar("VALIDANDO…", "wait");
+
+      bridge.contentWindow.postMessage({
+        type: "SAS_QR_VALIDATE",
+        requestId: Date.now().toString(),
+        codigo: codigo
+      }, "*");
+    }
+
+    async function iniciarCamara() {
+      if (!window.Html5Qrcode) {
+        mostrar("No se pudo cargar el lector. Revise Internet.", "no");
+        return;
+      }
+
+      document.getElementById("reader").style.display = "block";
+      document.getElementById("scan").style.display = "none";
+      document.getElementById("stop").style.display = "block";
+
+      scanner = new Html5Qrcode("reader");
+
+      try {
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          function(decodedText) {
+            validar(decodedText);
+          },
+          function() {}
+        );
+
+        mostrar("Apunte la cámara al código QR.", "wait");
+
+      } catch (error) {
+        mostrar(
+          "No se pudo abrir la cámara. Permita el uso de la cámara y vuelva a intentar.",
+          "no"
+        );
+
+        detenerCamara();
+      }
+    }
+
+    async function detenerCamara() {
+      if (scanner) {
+        try { await scanner.stop(); } catch (error) {}
+        try { await scanner.clear(); } catch (error) {}
+        scanner = null;
+      }
+
+      document.getElementById("reader").style.display = "none";
+      document.getElementById("scan").style.display = "block";
+      document.getElementById("stop").style.display = "none";
+    }
+
+    document.getElementById("scan").addEventListener("click", iniciarCamara);
+    document.getElementById("stop").addEventListener("click", detenerCamara);
+
+    document.getElementById("manual").addEventListener("click", function() {
+      validar(document.getElementById("code").value);
+    });
+
+    document.getElementById("code").addEventListener("keydown", function(event) {
+      if (event.key === "Enter") {
+        validar(event.target.value);
+      }
+    });
+
+    const urlGuardada = localStorage.getItem("sasAppsUrl");
+
+    if (urlGuardada) {
+      conectar(urlGuardada);
+    }
+  </script>
+</body>
+</html>

@@ -254,11 +254,23 @@
       validating = true;
       mostrar("VALIDANDO…", "wait");
 
-      bridge.contentWindow.postMessage({
-        type: "SAS_QR_VALIDATE",
-        requestId: Date.now().toString(),
-        codigo: codigo
-      }, "*");
+      const mensaje = {
+  type: "SAS_QR_VALIDATE",
+  requestId: Date.now().toString(),
+  codigo: codigo
+};
+
+function enviarAMarcos(marco) {
+  try {
+    marco.postMessage(mensaje, "*");
+
+    for (let i = 0; i < marco.frames.length; i++) {
+      enviarAMarcos(marco.frames[i]);
+    }
+  } catch (error) {}
+}
+
+enviarAMarcos(bridge.contentWindow);
     }
 
     async function iniciarCamara() {

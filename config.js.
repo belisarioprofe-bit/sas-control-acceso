@@ -1,1 +1,2 @@
-
+const SUPABASE_URL="https://gcqnerdlcnpaenmqtmkc.supabase.co";
+const SUPABASE_KEY="sb_publishable_qqWs_YB9RR-rjqmnL85hCA_XrVnX7l3";
